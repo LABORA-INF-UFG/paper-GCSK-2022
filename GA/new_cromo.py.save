@@ -1,0 +1,594 @@
+import json
+import random
+import math
+from datetime import datetime
+import time
+
+
+class Path:
+    def __init__(self, id, source, target, seq, p1, p2, p3, delay_p1, delay_p2, delay_p3):
+        self.id = id
+        self.source = source
+        self.target = target
+        self.seq = seq
+        self.p1 = p1
+        self.p2 = p2
+        self.p3 = p3
+        self.delay_p1 = delay_p1
+        self.delay_p2 = delay_p2
+        self.delay_p3 = delay_p3
+
+    def __str__(self):
+        return "ID: {}\tSEQ: {}\t P1: {}\t P2: {}\t P3: {}\t dP1: {}\t dP2: {}\t dP3: {}".format(self.id, self.seq,
+                                                                                                 self.p1, self.p2,
+                                                                                                 self.p3, self.delay_p1,
+                                                                                                 self.delay_p2,
+                                                                                                 self.delay_p3)
+
+
+class CR:
+    def __init__(self, id, cpu, num_BS):
+        self.id = id
+        self.cpu = cpu
+        self.num_BS = num_BS
+
+    def __str__(self):
+        return "ID: {}\tCPU: {}".format(self.id, self.cpu)
+
+
+class DRC:
+    def __init__(self, id, cpu_CU, cpu_DU, cpu_RU, ram_CU, ram_DU, ram_RU, Fs_CU, Fs_DU, Fs_RU, delay_BH, delay_MH,
+                 delay_FH, bw_BH, bw_MH, bw_FH, q_CRs):
+        self.id = id
+
+        self.cpu_CU = cpu_CU
+        self.ram_CU = ram_CU
+        self.Fs_CU = Fs_CU
+
+        self.cpu_DU = cpu_DU
+        self.ram_DU = ram_DU
+        self.Fs_DU = Fs_DU
+
+        self.cpu_RU = cpu_RU
+        self.ram_RU = ram_RU
+        self.Fs_RU = Fs_RU
+
+        self.delay_BH = delay_BH
+        self.delay_MH = delay_MH
+        self.delay_FH = delay_FH
+
+        self.bw_BH = bw_BH
+        self.bw_MH = bw_MH
+        self.bw_FH = bw_FH
+
+        self.q_CRs = q_CRs
+
+    def __str__(self):
+        return "ID: {} | {} - {} - {} | dP1: {}\t dP2: {}\t dP3: {}".format(self.id, self.Fs_CU, self.Fs_DU, self.Fs_RU,
+                                                                            self.delay_BH, self.delay_MH, self.delay_FH)
+
+
+class FS:
+    def __init__(self, id, f_cpu, f_ram):
+        self.id = id
+        self.f_cpu = f_cpu
+        self.f_ram = f_ram
+
+
+class RU:
+    def __init__(self, id, CR):
+        self.id = id
+        self.CR = CR
+
+    def __str__(self):
+        return "RU: {}\tCR: {}".format(self.id, self.CR)
+
+
+# Global vars
+links = []
+capacity = {}
+delay = {}
+crs = {}
+paths = {}
+conj_Fs = {}
+# {path_ID: [VNCs_list]}
+valid_path_VNC_combination = {}
+# {RU: [list_of_actions]}
+actions = {}
+# {action: (path, VNC)}
+actions_map = {}
+
+bw_factor = 1
+CPU_factor = 1
+delay_factor = 1
+
+
+def read_topology(q_CRs):
+    with open('model_files/topology_files/{}_CRs/New_T2_{}_links.json'.format(q_CRs, q_CRs)) as json_file:
+        data = json.load(json_file)
+        json_links = data["links"]
+        for item in json_links:
+            link = item
+            source_node = link["fromNode"]
+            destination_node = link["toNode"]
+            capacity[(source_node, destination_node)] = link["capacity"] * bw_factor
+            delay[(source_node, destination_node)] = link["delay"] * delay_factor
+            links.append((source_node, destination_node))
+            #capacity[(destination_node, source_node)] = link["capacity"] * bw_factor
+            #delay[(destination_node, source_node)] = link["delay"] * delay_factor
+            #links.append((destination_node, source_node))
+        with open('model_files/topology_files/{}_CRs/New_T2_{}_CRs.json'.format(q_CRs, q_CRs)) as json_file:
+            data = json.load(json_file)
+            json_nodes = data["nodes"]
+            for item in json_nodes:
+                node = item
+                CR_id = node["nodeNumber"]
+                node_CPU = node["cpu"] * CPU_factor
+                cr = CR(CR_id, node_CPU, 0)
+                crs[CR_id] = cr
+        crs[0] = CR(0, 0, 0)
+        with open('model_files/topology_files/{}_CRs/Murti_T2_{}_paths.json'.format(q_CRs, q_CRs)) as json_paths_file:
+            json_paths_f = json.load(json_paths_file)
+            json_paths = json_paths_f["paths"]
+            for item in json_paths:
+                path = json_paths[item]
+                path_id = path["id"]
+                path_source = path["source"]
+                if path_source == "CN":
+                    path_source = 0
+                path_target = path["target"]
+                path_seq = path["seq"]
+                paths_p = [path["p1"], path["p2"], path["p3"]]
+                list_p1 = []
+                list_p2 = []
+                list_p3 = []
+                for path_p in paths_p:
+                    aux = ""
+                    sum_delay = 0
+                    for tup in path_p:
+                        aux += tup
+                        tup_aux = tup
+                        tup_aux = tup_aux.replace('(', '')
+                        tup_aux = tup_aux.replace(')', '')
+                        tup_aux = tuple(map(int, tup_aux.split(', ')))
+                        if tup_aux[0] > tup_aux[1]:
+                            aux1 = tup_aux[0]
+                            aux2 = tup_aux[1]
+                            tup_aux = (aux2, aux1)
+                        if path_p == path["p1"]:
+                            list_p1.append(tup_aux)
+                        elif path_p == path["p2"]:
+                            list_p2.append(tup_aux)
+                        elif path_p == path["p3"]:
+                            list_p3.append(tup_aux)
+                        sum_delay += delay[tup_aux]
+
+                    if path_p == path["p1"]:
+                        delay_p1 = sum_delay
+                    elif path_p == path["p2"]:
+                        delay_p2 = sum_delay
+                    elif path_p == path["p3"]:
+                        delay_p3 = sum_delay
+                    if path_seq[0] == 0:
+                        delay_p1 = 0
+                    if path_seq[1] == 0:
+                        delay_p2 = 0
+                p = Path(path_id, path_source, path_target, path_seq, list_p1, list_p2, list_p3, delay_p1, delay_p2,
+                         delay_p3)
+                paths[path_id] = p
+
+
+def DRC_structure():
+    DRC1 = DRC(1, 0.49, 2.058, 2.352, 0.01, 0.01, 0.01, ['f8'], ['f7', 'f6', 'f5', 'f4', 'f3', 'f2'], ['f1', 'f0'], 10, 10, 0.25, 9.9, 13.2, 42.6, 3)
+    DRC2 = DRC(2, 0.98, 1.568, 2.352, 0.01, 0.01, 0.01, ['f8', 'f7'], ['f6', 'f5', 'f4', 'f3', 'f2'], ['f1', 'f0'], 10, 10, 0.25, 9.9, 13.2, 42.6, 3)
+    DRC4 = DRC(4, 0.49, 1.225, 3.185, 0.01, 0.01, 0.01, ['f8'], ['f7', 'f6', 'f5', 'f4', 'f3'], ['f2', 'f1', 'f0'], 10, 10, 0.25, 9.9, 13.2, 13.6, 3)
+    DRC5 = DRC(5, 0.98, 0.735, 3.185, 0.01, 0.01, 0.01, ['f8', 'f7'], ['f6', 'f5', 'f4', 'f3'], ['f2', 'f1', 'f0'], 10, 10, 0.25, 9.9, 13.2, 13.6, 3)
+    DRC6 = DRC(6, 0, 0.49, 4.41, 0, 0.01, 0.01, [0], ['f8'], ['f7', 'f6', 'f5', 'f4', 'f3', 'f2', 'f1', 'f0'], 0, 10, 10, 0, 9.9, 13.2, 2)
+    DRC7 = DRC(7, 0, 0.98, 3.92, 0, 0.01, 0.01, [0], ['f8', 'f7'], ['f6', 'f5', 'f4', 'f3', 'f2', 'f1', 'f0'], 0, 10, 10, 0, 9.9, 13.2, 2)
+    DRC9 = DRC(9, 0, 2.54, 2.354, 0, 0.01, 0.01, [0], ['f8', 'f7', 'f6', 'f5', 'f4', 'f3', 'f2'], ['f1', 'f0'], 0, 10, 0.25, 0, 9.9, 42.6, 2)
+    DRC0 = DRC(10, 0, 1.71, 3.185, 0, 0.01, 0.01, [0], ['f8', 'f7', 'f6', 'f5', 'f4', 'f3'], ['f2', 'f1', 'f0'], 0, 10, 0.25, 0, 3, 13.6, 2)
+    DRC8 = DRC(8, 0, 0, 4.9, 0, 0, 0.01, [0], [0], ['f8', 'f7', 'f6', 'f5', 'f4', 'f3', 'f2', 'f1', 'f0'], 0, 0, 10, 0, 0, 9.9, 1)
+    DRCs = {1: DRC1, 2: DRC2, 4: DRC4, 5: DRC5, 6: DRC6, 7: DRC7, 8: DRC8, 9: DRC9, 0: DRC0}
+    # DRCs = {2: DRC2, 5: DRC5, 7: DRC7, 8: DRC8, 9: DRC9, 0: DRC0}
+    return DRCs
+
+
+def RU_location(q_CRs):
+    rus = {}
+    count = 1
+    with open('model_files/topology_files/{}_CRs/New_T2_{}_CRs.json'.format(q_CRs, q_CRs)) as json_file:
+        data = json.load(json_file)
+        json_crs = data["nodes"]
+        for item in json_crs:
+            node = item
+            num_rus = node["RU"]
+            num_cr = node["nodeNumber"]
+            for i in range(0, num_rus):
+                rus[count] = RU(count, int(num_cr))
+                count += 1
+    return rus
+
+
+def calculate_fitness(croma, VNCs, paths_map, actions_map, fitness_list):
+    centralization = 0
+    fs_distribution = {}
+    used_crs = []
+    count = 0
+    bit = 0
+    ru = 1
+
+    if str(croma) in fitness_list:
+        return fitness_list[str(croma)]
+
+    while bit < len(croma):
+        p = paths[actions_map[croma[bit]][0]]
+        vnc = VNCs[actions_map[croma[bit]][1]]
+        bit += 1
+
+        if p.seq[0] not in fs_distribution:
+            fs_distribution[p.seq[0]] = {'f8': 0, 'f7': 0, 'f6': 0, 'f5': 0, 'f4': 0, 'f3': 0, 'f2': 0, 'f1': 0,
+                                         'f0': 0}
+        if p.seq[1] not in fs_distribution:
+            fs_distribution[p.seq[1]] = {'f8': 0, 'f7': 0, 'f6': 0, 'f5': 0, 'f4': 0, 'f3': 0, 'f2': 0, 'f1': 0,
+                                         'f0': 0}
+        if p.seq[2] not in fs_distribution:
+            fs_distribution[p.seq[2]] = {'f8': 0, 'f7': 0, 'f6': 0, 'f5': 0, 'f4': 0, 'f3': 0, 'f2': 0, 'f1': 0,
+                                         'f0': 0}
+
+        for f in vnc.Fs_CU:
+            if f != 0:
+                fs_distribution[p.seq[0]][f] += 1
+        for f in vnc.Fs_DU:
+            if f != 0:
+                fs_distribution[p.seq[1]][f] += 1
+        for f in vnc.Fs_RU:
+            if f != 0:
+                fs_distribution[p.seq[2]][f] += 1
+
+        if p.seq[0] != 0 and p.seq[0] not in used_crs:
+            used_crs.append(p.seq[0])
+        if p.seq[1] != 0 and p.seq[1] not in used_crs:
+            used_crs.append(p.seq[1])
+        if p.seq[2] != 0 and p.seq[2] not in used_crs:
+            used_crs.append(p.seq[2])
+        ru += 1
+
+    # fs_distribution.pop(0)
+
+    for cr in fs_distribution:
+        if cr != 0:
+            for f in fs_distribution[cr]:
+                if fs_distribution[cr][f] > 0:
+                    centralization += fs_distribution[cr][f] - 1
+
+    return len(used_crs) - centralization
+
+
+def tournament_selection(parents_pool, population_size):
+    new_parents = []
+    while len(new_parents) < population_size:
+        new_tournament = []
+        for i in range(0, 20):
+            new_tournament.append(parents_pool[random.randrange(0, population_size)])
+
+        best_candidate = {"id": 0, "fitness": 99999999999}
+
+        for candidate in new_tournament:
+            if candidate["fitness"] < best_candidate["fitness"]:
+                best_candidate = candidate
+
+        new_parents.append(best_candidate)
+
+    return new_parents
+
+
+def crossover(parent1, parent2, VNCs, paths, actions, actions_map, population, rus_ID):
+    position = random.randrange(0, len(parent1))
+    new_parent1 = parent1[0:position] + parent2[position:len(parent2)]
+    new_parent2 = parent2[0:position] + parent1[position:len(parent1)]
+    new_parent1 = validate_cromo(new_parent1, VNCs, paths, actions, actions_map, population, rus_ID)
+    new_parent2 = validate_cromo(new_parent2, VNCs, paths, actions, actions_map, population, rus_ID)
+
+    return new_parent1, new_parent2
+
+
+def mutation(parent1, parent2, mutation_param, VNCs, paths, actions, actions_map, population, rus_ID):
+    for i in range(0, len(parent1)):
+        if random.randrange(0, 100) < mutation_param + 1:
+            new_action = random.choice(actions[rus_ID[paths[actions_map[parent1[i]][0]].seq[2]]])
+            parent1 = parent1[:i] + [new_action] + parent1[i+1:len(parent1)]
+
+    for i in range(0, len(parent2)):
+        if random.randrange(0, 100) < mutation_param + 1:
+            new_action = random.choice(actions[rus_ID[paths[actions_map[parent1[i]][0]].seq[2]]])
+            parent2 = parent2[:i] + [new_action] + parent2[i+1:len(parent2)]
+
+    parent1 = validate_cromo(parent1, VNCs, paths, actions, actions_map, population, rus_ID)
+    parent2 = validate_cromo(parent2, VNCs, paths, actions, actions_map, population, rus_ID)
+
+    return parent1, parent2
+
+
+def validate_cromo(cromo, VNCs, paths, actions, actions_map, population, rus_ID):
+    current_capacity = capacity.copy()
+    ru = 1
+    count = 0
+    crs_capacity = {}
+
+    # Defines the complete CRs processing capacity
+    for cr in crs:
+        crs_capacity[crs[cr].id] = crs[cr].cpu
+
+    # Check the decisions RU by RU
+    while count < len(cromo):
+        p = paths[actions_map[cromo[count]][0]]
+        vnc = VNCs[actions_map[cromo[count]][1]]
+
+        valid = True
+        # Check the BH links capacity constraint
+        for l in p.p1:
+            if current_capacity[l] - vnc.bw_BH >= 0:
+                current_capacity[l] -= vnc.bw_BH
+            else:
+                valid = False
+                break
+        # Check the MH links capacity constraint
+        if valid:
+            for l in p.p2:
+                if current_capacity[l] - vnc.bw_MH >= 0:
+                    current_capacity[l] -= vnc.bw_MH
+                else:
+                    valid = False
+                    break
+        # Check the FH links capacity constraint
+        if valid:
+            for l in p.p3:
+                if current_capacity[l] - vnc.bw_FH >= 0:
+                    current_capacity[l] -= vnc.bw_FH
+                else:
+                    valid = False
+                    break
+
+        # Check the CR processing capacity constraint - [CU]
+        if valid:
+            if crs_capacity[p.seq[0]] - vnc.cpu_CU >= 0:
+                crs_capacity[p.seq[0]] -= vnc.cpu_CU
+            else:
+                valid = False
+
+        # Check the CR processing capacity constraint - [DU] or [CU/DU]
+        if valid:
+            if crs_capacity[p.seq[1]] - vnc.cpu_DU >= 0:
+                crs_capacity[p.seq[1]] -= vnc.cpu_DU
+            else:
+                valid = False
+
+        # Check the CR processing capacity constraint - [RU] or [DU/RU] or [CU/DU/RU]
+        if valid:
+            if crs_capacity[p.seq[2]] - vnc.cpu_RU >= 0:
+                crs_capacity[p.seq[2]] -= vnc.cpu_RU
+            else:
+                valid = False
+
+        # Check the VNCs delay constraint for BH, MH and FH
+        if valid:
+            if p.delay_p1 > vnc.delay_BH or p.delay_p2 > vnc.delay_MH or p.delay_p3 > vnc.delay_FH:
+                valid = False
+
+        if valid:
+            ru += 1
+            count += 1
+        else:
+            for cr in crs:
+                crs_capacity[crs[cr].id] = crs[cr].cpu
+
+            if len(population) <= 2:
+                bit = random.randrange(0, len(cromo))
+                new_action = -1
+                for tmp_ac in actions[rus_ID[paths[actions_map[cromo[bit]][0]].seq[2]]]:
+                    if actions_map[tmp_ac][1] == 8:
+                        new_action = tmp_ac
+                if new_action == -1:
+                    new_action = random.choice(actions[rus_ID[paths[actions_map[cromo[bit]][0]].seq[2]]])
+                cromo[bit] = new_action
+            else:
+                older_population = population[random.randrange(0, len(population)-2)]
+                cromo = older_population[random.randrange(0, len(older_population)-1)]["id"]
+            count = 0
+            ru = 1
+            current_capacity = capacity.copy()
+
+    return cromo
+
+
+def my_AG(population_size, number_of_generations, crossover_param, mutation_param, q_CRs, test_number):
+    test_start_time = time.time()
+    read_topology(q_CRs)
+    mutation_param_list = mutation_param
+    fitness_list = {}
+    random.seed(datetime.now().timestamp())
+    population = {}
+    population[0] = []
+    best_fitness = {"history": []}
+    best_fitness_time = {"time": []}
+
+    rus = RU_location(q_CRs)
+    VNCs = DRC_structure()
+
+    rus_ID = {}
+
+    for ru in rus:
+        rus_ID[rus[ru].CR] = ru
+
+    for p in paths:
+        valid_path_VNC_combination[paths[p].id] = []
+
+        if paths[p].seq[0] == 0 and paths[p].seq[1] == 0:
+            # only D-RAN is possible
+            valid_path_VNC_combination[paths[p].id].append(8)
+        elif paths[p].seq[0] == 0 and paths[p].seq[1] != 0:
+            # only NG_RAN(2) and C-RAN is possible
+            if VNCs[6].delay_BH >= paths[p].delay_p1 and VNCs[6].delay_MH >= paths[p].delay_p2 and VNCs[6].delay_FH >= paths[p].delay_p3:
+                valid_path_VNC_combination[paths[p].id].append(6)
+            if VNCs[7].delay_BH >= paths[p].delay_p1 and VNCs[7].delay_MH >= paths[p].delay_p2 and VNCs[7].delay_FH >= paths[p].delay_p3:
+                valid_path_VNC_combination[paths[p].id].append(7)
+            if VNCs[9].delay_BH >= paths[p].delay_p1 and VNCs[9].delay_MH >= paths[p].delay_p2 and VNCs[9].delay_FH >= paths[p].delay_p3:
+                valid_path_VNC_combination[paths[p].id].append(9)
+            if VNCs[0].delay_BH >= paths[p].delay_p1 and VNCs[0].delay_MH >= paths[p].delay_p2 and VNCs[0].delay_FH >= paths[p].delay_p3:
+                valid_path_VNC_combination[paths[p].id].append(0)
+        else:
+            # only NG_RAN(3) is possible
+            if VNCs[1].delay_BH >= paths[p].delay_p1 and VNCs[1].delay_MH >= paths[p].delay_p2 and VNCs[1].delay_FH >= paths[p].delay_p3:
+                valid_path_VNC_combination[paths[p].id].append(1)
+            if VNCs[2].delay_BH >= paths[p].delay_p1 and VNCs[2].delay_MH >= paths[p].delay_p2 and VNCs[2].delay_FH >= paths[p].delay_p3:
+                valid_path_VNC_combination[paths[p].id].append(2)
+            if VNCs[4].delay_BH >= paths[p].delay_p1 and VNCs[4].delay_MH >= paths[p].delay_p2 and VNCs[4].delay_FH >= paths[p].delay_p3:
+                valid_path_VNC_combination[paths[p].id].append(4)
+            if VNCs[5].delay_BH >= paths[p].delay_p1 and VNCs[5].delay_MH >= paths[p].delay_p2 and VNCs[5].delay_FH >= paths[p].delay_p3:
+                valid_path_VNC_combination[paths[p].id].append(5)
+
+        if not valid_path_VNC_combination[paths[p].id]:
+            valid_path_VNC_combination.pop(paths[p].id)
+
+    paths_map = {}
+
+    for ru in rus:
+        paths_map[rus[ru].id] = []
+        for p in valid_path_VNC_combination:
+            if paths[p].target == rus[ru].CR:
+                paths_map[rus[ru].id].append(paths[p].id)
+
+    for ru in paths_map:
+        while len(paths_map[ru]) >= 10:
+            paths_map[ru].pop(random.randrange(0, len(paths_map[ru])))
+
+    for p in valid_path_VNC_combination:
+        actions[rus_ID[paths[p].seq[2]]] = []
+
+    action_id = 0
+
+    for p in valid_path_VNC_combination:
+        for vnc in valid_path_VNC_combination[p]:
+            actions[rus_ID[paths[p].seq[2]]].append(action_id)
+            actions_map[action_id] = (p, vnc)
+            action_id += 1
+
+    for generation in range(0, number_of_generations):
+        # print("----------------------------------------------------------------------------------------------")
+        print("Generation", generation)
+        # print("----------------------------------------------------------------------------------------------")
+        population[generation + 1] = []
+        mutation_param = mutation_param_list[int(generation/100)]
+
+        rand_gen = False
+        if not generation:
+            for i in range(0, population_size):
+                # print(rand_gen)
+                new_cromo = []
+                for ru in rus:
+                    new_action = -1
+                    if not rand_gen:
+                        for act in actions[ru]:
+                            if actions_map[act][1] in []: # 2
+                                new_action = act
+                                break
+                        for act in actions[ru]:
+                            if actions_map[act][1] in [0]: # 9
+                                new_action = act
+                                break
+                        if new_action == -1:
+                            for act in actions[ru]:
+                                if actions_map[act][1] in [6]: # 7
+                                    new_action = act
+                                    break
+                    if new_action == -1:
+                        new_action = random.choice(actions[ru])
+                    new_cromo.append(new_action)
+                new_cromo = validate_cromo(new_cromo, VNCs, paths, actions, actions_map, population, rus_ID)
+
+                new_fit = calculate_fitness(new_cromo, VNCs, paths, actions_map, fitness_list)
+                if not rand_gen:
+                    print(new_fit)
+                rand_gen = True 
+
+                population[generation].append({"id": new_cromo, "fitness": new_fit})
+
+                if str(new_cromo) not in fitness_list:
+                    fitness_list[str(new_cromo)] = new_fit
+                # print({"id": new_cromo, "fitness": calculate_fitness(new_cromo, VNCs, paths_map, fitness_list)})
+                # print(paths_map)
+
+        value = 99999999
+
+        for cromo in population[generation]:
+            if cromo["fitness"] < value:
+                value = cromo["fitness"]
+                best_cromo = cromo
+        VNCs_best = []
+        for act in best_cromo["id"]:
+            VNCs_best.append(actions_map[act][1])
+        print(best_cromo["fitness"])
+        best_fitness["history"].append(best_cromo["fitness"])
+        best_fitness_time["time"].append(time.time() - test_start_time)
+
+        parents_pool = population[generation]
+
+        selected_parents = tournament_selection(parents_pool, population_size)
+
+        it = 0
+
+        while it < len(selected_parents):
+            parent1 = selected_parents[it]
+            it += 1
+            parent2 = selected_parents[it]
+
+            if random.randrange(0, 100) < crossover_param + 1:
+                parent1["id"], parent2["id"] = crossover(parent1["id"], parent2["id"], VNCs, paths, actions, actions_map, population, rus_ID)
+
+            parent1["id"], parent2["id"] = mutation(parent1["id"], parent2["id"], mutation_param, VNCs, paths, actions, actions_map, population, rus_ID)
+
+            new_fit = calculate_fitness(parent1["id"], VNCs, paths, actions_map, fitness_list)
+            population[generation + 1].append({"id": parent1["id"], "fitness": new_fit})
+
+            if str(parent1["id"]) not in fitness_list:
+                fitness_list[str(parent1["id"])] = new_fit
+
+            new_fit = calculate_fitness(parent2["id"], VNCs, paths, actions_map, fitness_list)
+
+            if str(parent2["id"]) not in fitness_list:
+                fitness_list[str(parent2["id"])] = new_fit
+
+            population[generation + 1].append({"id": parent2["id"], "fitness": new_fit})
+            it += 1
+
+        index_out = random.randrange(0, len(population[generation + 1]))
+        population[generation + 1][index_out] = best_cromo
+
+        generation += 1
+
+    fitness_file = open("Topology_T2_{}_CRs_result/fistness_history_test_{}.json".format(q_CRs, test_number), "w")
+    time_file = open("Topology_T2_{}_CRs_result/history_time_{}.json".format(q_CRs, test_number), "w")
+    json.dump(best_fitness, fitness_file)
+    json.dump(best_fitness_time, time_file)
+    # print("BEST CROMO: ", best_fitness)
+    print("TEST TIME: ", time.time() - test_start_time)
+    return population
+
+
+if __name__ == '__main__':
+    bw_factor = 100
+    CPU_factor = 1
+    delay_factor = 0.1
+    for q_CRs in [250]: # [50, 100, 150, 200, 250, 300, 350, 400, 450, 500]:
+        start_time = time.time()
+
+        for j in range(1, 6):
+            all_population = my_AG(population_size=50,
+                                   number_of_generations=1000,
+                                   crossover_param=75,
+                                   mutation_param=[2, 2, 2, 1, 1, 1, 0, 0, 0, 0],
+                                   q_CRs=q_CRs,
+                                   test_number=j)
+
+        end_time = time.time()
+        print("TOTAL TIME: {}".format(end_time - start_time))

@@ -1,0 +1,45 @@
+import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+x = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+x_PlaceRAN = [1, 2, 3, 4, 5, 6, 7, 8]
+x_DRL = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+y_constant = [50, 100, 150, 200, 250, 300, 350, 400, 450, 500]
+
+y_DRL = [236, 444, 54, 883, 226, 1060, 1694, 408, 162, 1931] #, 490, 354, 403, 547, 706, 524]
+GA_sol_1 = [272, 537, 679, 970, 1104, 1320, 1399, 1728, 1821, 1944]
+y_GA = [272, 544, 759, 970, 1104, 1584, 1491, 1915, 1933, 2010]
+y_PlaceRAN = [273, 552, 833, 1107, 1386, 1665, 2063, 2225] #, 673, 752, 869, 945, 1025]
+
+for i in range(0, len(y_constant)):
+    y_DRL[i] += y_constant[i]
+    y_GA[i] += y_constant[i]
+    GA_sol_1[i] += y_constant[i]
+    if i < 8:
+        y_PlaceRAN[i] += y_constant[i]
+
+fig = plt.figure(figsize=(10, 3))
+m_size = 10
+lw_size = 3
+plt.plot(x_DRL, y_DRL, color="gray", marker="v", markersize=m_size, lw=lw_size)
+plt.plot(x, GA_sol_1, color="peru", marker="^", linestyle='--', markersize=m_size, lw=lw_size)
+plt.plot(x_PlaceRAN, y_PlaceRAN, color="navy", marker="o", markersize=m_size, lw=lw_size)
+plt.plot(x, y_GA, color="royalblue", marker="^", markersize=m_size, lw=lw_size)
+# plt.yscale("log")
+plt.grid(color='gray', linestyle='--', linewidth=0.5)
+plt.xticks(ticks=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10], labels=["50", "100", "150", "200", "250", "300", "350", "400", "450", "500"], fontsize=20)
+plt.yticks(ticks=[0, 500, 1000, 1500, 2000, 2500, 3000], fontsize=18)
+
+plt.ylabel("Centralization (#)", fontsize=20)
+plt.xlabel('RUs (#)', fontsize=20)
+
+# legend_elements = [Line2D([0], [0], color='firebrick', lw=3, label='Murti [11]'),
+#                    Line2D([0], [0], color='gray', lw=3, label='DRL Agent [12]'),
+#                    Line2D([0], [0], color='peru', lw=3, label='GA first solution'),
+#                    Line2D([0], [0], color='royalblue', lw=3, label='GA best solution'),
+#                    Line2D([0], [0], color='navy', lw=3, label='PlaceRAN [4]')]
+# plt.legend(handles=legend_elements, loc="upper left")
+
+plt.savefig("line_agg_handmade_k4.pdf", bbox_inches='tight')
+
+plt.show()
