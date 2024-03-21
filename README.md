@@ -1,8 +1,7 @@
-# paper-GCSK-2022
-# Optimal joint functional split and network functionplacement in virtualized RAN with splittable flows
+# A Genetic Algorithm for Efficiently Solving the Virtualized Radio Access Network Placement Problem
 
 ## Description
-This repository aims to demonstrate the Genetic Algorithm implementation presented in "A Genetic Algorithm for Efficiently Solving the Virtualized Radio Access Network Placement Problem".
+This repository aims to demonstrate the Genetic Algorithm implementation presented in our paper.
 
 To run the experiments we also implemented a heuristic on the individuals first generation, creating a single individual synthetically. This individual is created based on the VNCs, where VNCs that centralize more VNFs are more likely to be chosen. This approach does not bias the search, since it causes the insertion of a single individual in population, at the beginning of the search, which may or may not be feasible. To run the experiments we used a bare metal machine with a Intel(R) Core(TM) i7-10700F CPU @ 2.90GHz 16 cores, 32GB of main memory and 1TB of SSD, using python version 3.10.6.
 ## Citation
